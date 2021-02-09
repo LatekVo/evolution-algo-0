@@ -7,9 +7,8 @@ const GRAVITY: f64 = 0.02; // 0.01 unit/time_unit
 // stat // const WINGS_COST: f64 = 0.98; // transmission cost/drag
 const NODES_COUNT: u32 = 4; // nodes per layer
 
-const RNG_RANGE: f64 = 0.20; //rand -+ percentage
-
-const TIME_STEP: f64 = 1.00;
+const RNG_RANGE: f64 = 0.50; //rand -+ percentage
+const TIME_STEP: f64 = 0.50; //half time_step for now for time improvment 
 
 #[derive(Clone)]
 struct Node {
@@ -73,14 +72,16 @@ struct Guy {
     //both wings but one is for glide, 
     //and one if for force it can conert
     wings: f64, //conversion cost
-    glide: f64, //glide
+    //glide: f64
 
     //inputs are volitile
     nodes: Vec<Node>, //node behaviour is non-volitile
     //outputs are volitile
     
     //final
-    dist: f64
+    dist: f64,
+
+    debug: Vec<(String, f64)>
 }
 
 /*impl Clone for Guy {
@@ -99,7 +100,7 @@ impl Guy {
             //weight: 0.5, 
 
             wings: 0.5, //conversion cost
-            glide: 0.5, //glide
+            //glide: 0.5, //glide
 
             nodes: {
                 
@@ -117,6 +118,8 @@ impl Guy {
 
                 nodes_tmp
             },
+            
+            debug: Vec::new(),
 
             dist: 0.0, //decided to not compute it here
         }
@@ -129,6 +132,9 @@ impl Guy {
         let mut rng_wings:f64 = rand::thread_rng().gen_range(1.00-RNG_RANGE, 1.00+RNG_RANGE);
         let mut rng_node = rand::thread_rng(); 
         let mut v_nodes = rep.clone().nodes;
+    
+        let mut pre_debug: Vec<(String, f64)> = Vec::new();
+        
 
         Guy {
 
@@ -162,7 +168,9 @@ impl Guy {
                 }
                 rep.wings * rng_wings
             },
-            glide: 1.00 - (rep.wings * rng_wings),
+            // glide is not used so wings probably will go to top
+            // once the incremental bug is fixed
+            //glide: 1.00 - (rep.wings * rng_wings),
          
             /* too hard to implement for now,
             weight: {
@@ -186,7 +194,7 @@ impl Guy {
                 let mut wings_angle: f64 = 0.00;
                 let mut wing_surface: f64 = 0.00;
 
-                loop {
+                loop { //CALCULATIONS BEGIN
 
                     //SUPER IMPORTANT!
                     //  outputs min -1 max 1
@@ -200,24 +208,43 @@ impl Guy {
                     //  wing_surface
                     //  wing_angle (conversion of height-speed)
                 
+                    //setting up nodes
                     for i in 0..v_nodes.clone().len() {
                         
-                        v_nodes[i].input[0] = x_speed * v_nodes[i].input_multiplier[0];
-                        v_nodes[i].input[1] = y_speed * v_nodes[i].input[1];
-                        v_nodes[i].input[2] = y * v_nodes[i].input[2];
+                        v_nodes[i].input[0] = x_speed   * v_nodes[i].input_multiplier[0];
+                        v_nodes[i].input[1] = y_speed   * v_nodes[i].input_multiplier[1];
+                        v_nodes[i].input[2] = y         * v_nodes[i].input_multiplier[2];
                         //x doesnt matter at all
                 
-                    } 
-                    //computing begin
-                    
+                    }//nodes setup end
 
-                    
-                    //computing end
+                    //node computing begin
+                    for i in 0..v_nodes.clone().len() {                                    
+                        for j in 0..v_nodes[i].output.clone().len() {
+                            for k in 0..v_nodes[i].input.clone().len() {
+                            
+                                //  input is already multiplied
+                                v_nodes[i].output[j] += v_nodes[i].input[k];    
+                                //  output is multiplied some lines later
 
+                            } 
+                        }                                      
+                    }
+                    //node computing end
+    
+                    //assigning node outputs begin
+                    // reset before recalculating!
+                    wing_surface = 0.5; 
+                    wings_angle = 0.5;
                     for i in 0..v_nodes.clone().len() {
                         
-                        wing_surface += v_nodes[i].output[0] * v_nodes[i].output_multiplier[0];
-                        wings_angle += v_nodes[i].output[1] * v_nodes[i].output_multiplier[0];
+                        //Multiplication makes system WAY more controllable, especially
+                        //that i didnt design my system to handle '-' values. One more
+                        //important note, i SHOULD add, or enable system to procedurally
+                        //add '* -1' nodes to easly reverse the value they are handling
+                        
+                        wing_surface *= v_nodes[i].output[0] * v_nodes[i].output_multiplier[0];
+                        wings_angle *=  v_nodes[i].output[1] * v_nodes[i].output_multiplier[1];
                     
                     }
                     if wing_surface > 1.0 {
@@ -227,34 +254,57 @@ impl Guy {
                         wing_surface = 0.0;
                     }
                     
-                    if wing_surface > 1.0 {
-                        wing_surface = 1.0;   
+                    if wings_angle > 1.0 {
+                        wings_angle = 1.0;   
                     }
-                    if wing_surface < -1.0 {
-                        wing_surface = -1.0;
-                    }
-
-
-                    //[ 1 up | 0 middle | -1 down ]
-                    x_speed = (x_speed - ((x_speed * (rep.wings * rng_wings) * wing_surface) * wings_angle)) * RESISTANCE;
-                    //                 ^ reverse v |    Conversion*efficiency*controll*direction
-                    y_speed = (y_speed - GRAVITY)+((x_speed * (rep.wings * rng_wings) * wings_angle * wing_surface)) * RESISTANCE;
-                    //                                                            may do RESISTANCE * RESISTANCE;
+                    if wings_angle < 0.0 {
+                        wings_angle = 0.0;
+                    }//assigning node outputs end
                     
-                    x += x_speed*TIME_STEP;
-                    y += y_speed*TIME_STEP;
-                    if y < 0.00 {
+                    let old_x_speed = x_speed; //DEBUG
+                    let old_y_speed = y_speed; //DEBUG
+
+                    //                      Conversion*efficiency*controll*direction
+                    //                efficiency                 angle           efficiency2      this is really funky
+                    let lift = (rep.wings * rng_wings) * (wings_angle-0.5)*2.0 * wing_surface * x_speed*0.5 * y_speed*0.5 * RESISTANCE; 
+                    //                                 number center correction
+                        //Yes, resistance is double-calculated
+                        //because lift creates additional drag
+                                                                                                            
+
+                    //[ 0 min | 1 max ] Ughhh, finding correct formula is so tidious
+                    x_speed = (x_speed - lift) * RESISTANCE;
+                    //                 | reverse        
+                    y_speed = (y_speed + lift) * RESISTANCE - GRAVITY; 
+                    //decided to add gravity here for it to impact resistance calculations with delay
+                    //                    may do RESISTANCE * RESISTANCE;
+                    
+                    println!("   .   x_gain: {}", x_speed - old_x_speed); //a bit of unnecessary inefficiency but                     
+                    println!("   .   y_gain: {}", y_speed - old_y_speed); //this code is a big pile of mess anyways
+
+                    x += x_speed * TIME_STEP; //smaller time_step% may lead to more precision
+                    y += y_speed * TIME_STEP;
+                    println!("      x: {}     y: {}", x, y);
+                    if (y < 0.00) || (x_speed < 0.00) {
+                        if x_speed < 0.00 {
+                            pre_debug.push((String::from("finished prematurly due to reverse speed: "), x_speed));
+                        }
+                        pre_debug.push((String::from("wings_angle"), wings_angle));
+                        pre_debug.push((String::from("wing_surface"), wing_surface));
+                        pre_debug.push((String::from("wing:glide"), rep.wings * rng_wings));
+                        pre_debug.push((String::from("lift"), lift));
                         break;
-                    } 
-                }
+                    }  
+                } //END CALCULATIONS
                 
                 println!("  current candidate's dist: {} pwr: {}%, jmp: {}%", 
                     x, rep.power * rng_dir * 100.0, rep.jump * rng_dir * 100.0);
 
                 x //returned
                 
-            }, 
-            //i should replace this with calculations
+            },
+
+            debug: pre_debug,
         }
     }
 }
@@ -307,26 +357,26 @@ fn main() {
     }
     println!("And the best result is {} achived with jmp at {}% and pwr at {}%", 
         last_best_score, best_guy.clone().jump * 100.00, best_guy.clone().power * 100.00);
-    println!("  using this node positions:");
-    println!("  Node{} inputs | outputs", 0);
-    println!("          {}        {}", best_guy.nodes[0].input_multiplier[0], best_guy.nodes[0].output_multiplier[0]); 
-    println!("          {}        {}", best_guy.nodes[0].input_multiplier[1], best_guy.nodes[0].output_multiplier[1]); 
-    println!("          {}          ", best_guy.nodes[0].input_multiplier[2]);
-    println!("          {}          ", best_guy.nodes[0].input_multiplier[3]);
-    println!("  Node{} inputs | outputs", 1);
-    println!("          {}        {}", best_guy.nodes[1].input_multiplier[0], best_guy.nodes[1].output_multiplier[0]); 
-    println!("          {}        {}", best_guy.nodes[1].input_multiplier[1], best_guy.nodes[1].output_multiplier[1]); 
-    println!("          {}          ", best_guy.nodes[1].input_multiplier[2]);
-    println!("          {}          ", best_guy.nodes[1].input_multiplier[3]);
-    println!("  Node{} inputs | outputs", 2);
-    println!("          {}        {}", best_guy.nodes[2].input_multiplier[0], best_guy.nodes[2].output_multiplier[0]); 
-    println!("          {}        {}", best_guy.nodes[2].input_multiplier[1], best_guy.nodes[2].output_multiplier[1]); 
-    println!("          {}          ", best_guy.nodes[2].input_multiplier[2]); 
-    println!("          {}          ", best_guy.nodes[2].input_multiplier[3]); 
-   /* println!("  Node{} inputs | outputs", 3);
-    println!("          {}        {}", best_guy.nodes[3].input_multiplier[0], best_guy.nodes[3].output_multiplier[0]); 
-    println!("          {}        {}", best_guy.nodes[3].input_multiplier[1], best_guy.nodes[3].output_multiplier[1]); 
-    println!("          {}          ", best_guy.nodes[3].input_multiplier[2]); 
-    println!("          {}          ", best_guy.nodes[3].input_multiplier[3]); 
-*/
+    
+    println!("  using this {} node positions:", best_guy.nodes.clone().len());
+    for i in 0..best_guy.nodes.clone().len() {
+        println!("      Node{} inputs | outputs", i);
+        let mut b = 0; //for output counter
+        for a in 0..best_guy.nodes[i].input_multiplier.clone().len() { 
+            print!("              {}        ", best_guy.clone().nodes[i].input_multiplier[a]);
+            
+            if b < best_guy.nodes[i].output_multiplier.clone().len() {
+                print!("{}", best_guy.clone().nodes[i].output_multiplier[b]); 
+                b += 1;
+            }
+            println!();
+        }
+    }
+
+    
+    println!("and individual stats of last keyframe:");
+    for i in 0..best_guy.debug.clone().len() {
+        let (a, b) = best_guy.debug[i].clone();
+        println!("  {}: {}", a, b);
+    }
 }
