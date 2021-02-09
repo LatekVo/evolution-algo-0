@@ -1,13 +1,15 @@
 extern crate rand;
 
 use rand::Rng;
-       
+  
+const GUY_COUNT: u32 = 1_000;
+
 const RESISTANCE: f64 = 0.98; // 0.98 = 2% resistance
 const GRAVITY: f64 = 0.02; // 0.01 unit/time_unit
 // stat // const WINGS_COST: f64 = 0.98; // transmission cost/drag
 const NODES_COUNT: u32 = 4; // nodes per layer
 
-const RNG_RANGE: f64 = 0.50; //rand -+ percentage
+const RNG_RANGE: f64 = 2.00; //rand -+ percentage
 const TIME_STEP: f64 = 0.50; //half time_step for now for time improvment 
 
 #[derive(Clone)]
@@ -224,7 +226,10 @@ impl Guy {
                             for k in 0..v_nodes[i].input.clone().len() {
                             
                                 //  input is already multiplied
-                                v_nodes[i].output[j] += v_nodes[i].input[k];    
+                                //
+                                //  changed this to multiplication, may be broken
+                                //  ye, that made it broken
+                                v_nodes[i].output[j] += v_nodes[i].input[k];
                                 //  output is multiplied some lines later
 
                             } 
@@ -322,7 +327,7 @@ fn main() {
 
     loop {
         
-        for _ in 0..1_000 {  
+        for _ in 0..GUY_COUNT {  
             guys.push(Guy::from(best_guy.clone()));
         }
 
